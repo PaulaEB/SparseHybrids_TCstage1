@@ -1,0 +1,27 @@
+# R / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# macOS
+.DS_Store
+
+# Office temp files
+~$*.pptx
+~$*.xlsx
+
+Optional: outputs (uncomment if you don't want them tracked)
+*.pptx
+*.xlsx
+*.png
+*.csv
+
+# Outputs
+#results/
+#results2/
+
+# Scratch/test scripts
+Testcross_Scripts/2Loop_dom_test_it.R
+qgm_helpers_t2.R
+

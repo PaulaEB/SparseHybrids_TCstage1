@@ -1,0 +1,576 @@
+---
+title: "Stage1: testcross"
+author: "PaulaE"
+date: "2026-01-20"
+output: html_document
+---
+
+**Objective**
+
+Compare the GCA estimates from a testcross with 3 testers vs the true GCA from the full factorial cross with an additive trait and a dominance trait.
+
+1. Defining parameters for the testcross simulation in a maize hybrid breeding program based on Gonzalez-Dieguez et al. and 2025, Bančič et al., 2024; and parameters for the experimental design based on Tolhurst (Genome-wide association studies - Single environment simulation)
+
+```{r}
+rm(list = ls())
+.rs.restartR()
+library(AlphaSimR)
+
+# Testcross parameters
+nparents <- 80 #Number of parents in both pools
+nchr <- 10 #Number of chromosomes in maize
+nqtl <- 500 #Lit causal QTL for a trait. So total is nchr x nqtl = 5000 QTL
+nGenSplit = 50 #Heterotic pool split
+ntesters <- 1 #number of testers for the testcrosses
+# ncrosses <- 60
+# nsnps <- 500 # If we want to add SNP chip
+
+# Trait parameters
+meanG <- 70
+varG <- 20
+h2 <- 0.3 # plot-level heritability, ratio of genetic to phenotypic variance, varG/(varG + varE)
+# meanDD <- 0.9 #high dominance according to Gonzalez-Dieguez 2025
+# varDD <- 0.2
+
+# Experimental design parameters: full factorial
+nenvs <- 1
+nblocks <- nreps <- 2
+ngenos_ff <- (nparents/2)*(nparents/2)
+
+```
+
+2. Simulate the founder population of inbreds with a historic population split of 50 generations to create two heterotic pools with drift. Also add two traits: one additive (Trait 1) and one with high dominance (Trait 2).
+
+```{r}
+founderpop <- runMacs(nInd=nparents, 
+                      nChr=nchr, 
+                      segSites=nqtl, 
+                      inbred=TRUE,
+                      species="MAIZE",
+                      split = nGenSplit)
+
+SP <- SimParam$new(founderpop)
+SP$setTrackPed(TRUE)
+SP$addTraitA(nQtlPerChr=nqtl, mean=meanG, var=varG)
+# SP$addTraitAD(nQtlPerChr=nqtl, mean=meanG, var=varG, meanDD=meanDD, varDD=varDD) #mean dominance degree and variance of the dominance degree
+
+founderpop
+```
+
+2. Create both heterotic pools
+
+```{r}
+poolA <- newPop(founderpop[1:(nparents/2)])
+poolB <- newPop(founderpop[((nparents/2)+1):(nparents)])
+
+poolA@id 
+poolB@id
+ 
+```
+2.1. Check allele frequencies between pools from the genotypes. If the QTL are the same for SNP genotypes (no SNP chip added), pullQtlGeno() and pullSegSiteGeno() will be the same . 
+
+```{r}
+identical((pullSegSiteGeno(poolB)),(pullQtlGeno(poolB)))
+M_qtlA <- pullSegSiteGeno(poolA)
+dim(M_qtlA) # it should be the individuals in pool A (rows) and the number of QTL (columns). This is noted by chromosome_locus.
+M_qtlB <- pullSegSiteGeno(poolB)
+dim(M_qtlB) # it should be the individuals in pool B (rows) and the number of QTL (columns). This is noted by chromosome_locus. 
+
+# Calculate the allele frequencies per pool 
+alleleFreqsA <- colMeans(M_qtlA)/2 #divide by 2 because it is a diploid and we have the allele dosages 
+length(alleleFreqsA)
+alleleFreqsB <- colMeans(M_qtlB)/2
+length(alleleFreqsB)
+
+cor(alleleFreqsA, alleleFreqsB) # 0.6738552 meaning the frequencies of the two pools are correlated positively, but it does not mean that are not delivering heterosis (theoretically~-1), it depends on the QTL effects and dominance 
+mean(abs(alleleFreqsA - alleleFreqsB)) # 0.185715 this mean does not consider the direction of the allele frequency difference
+plot(alleleFreqsA, alleleFreqsB,
+     xlab = "Allele frequencies Pool A",
+     ylab = "Allele frequencies Pool B",
+     main = paste0("Allele frequencies between pools with split = ", nGenSplit),
+     pch = 1, col = "grey60")
+abline(0,1, lwd = 2)
+legend("topleft",
+       legend = sprintf("correlation = %.3f", cor(alleleFreqsA, alleleFreqsB)),
+       bty = "n")
+
+```
+Run a PCA for pop structure
+
+```{r}
+# PCA between pools
+G <- rbind(M_qtlA, M_qtlB)
+pools <- factor(c(rep("A", nrow(M_qtlA)), rep("B", nrow(M_qtlB))))
+pc <- prcomp(G, center = TRUE, scale. = FALSE)
+summary(pc)
+#Variance explained 2 components
+M_vaf1 <- 100*pc$sdev[1]^2/sum(pc$sdev^2)
+M_vaf2 <- 100*pc$sdev[2]^2/sum(pc$sdev^2)
+
+plot(pc$x[,1], pc$x[,2],
+     col = c("A"="purple","B"="black")[pools], pch = 19,
+     xlab = sprintf("PC1 (%.1f%%)", M_vaf1),
+     ylab = sprintf("PC2 (%.1f%%)", M_vaf2), main = "Between pools")
+
+legend("topright", c("Pool A","Pool B"), col = c("purple","black"), pch = 19, bty = "n")
+
+```
+
+Check population structure within pools 
+
+```{r}
+par(mfrow=c(1,2))
+
+# PCA pool A
+pc_poolA <- prcomp(M_qtlA, center = TRUE, scale. = FALSE)
+summary(pc_poolA)
+#Variance explained 2 components
+M_vaf1_poolA <- 100*pc_poolA$sdev[1]^2/sum(pc_poolA$sdev^2)
+M_vaf2_poolA <- 100*pc_poolA$sdev[2]^2/sum(pc_poolA$sdev^2)
+
+plot(pc_poolA$x[,1], pc_poolA$x[,2],
+     col = "purple", 
+     pch = 1, 
+     xlab = sprintf("PC1 (%.1f%%)", M_vaf1_poolA),
+     ylab = sprintf("PC2 (%.1f%%)", M_vaf2_poolA))
+
+# PCA pool B
+pc_poolB <- prcomp(M_qtlB, center = TRUE, scale. = FALSE)
+summary(pc_poolB)
+#Variance explained 2 components
+M_vaf1_poolB <- 100*pc_poolB$sdev[1]^2/sum(pc_poolB$sdev^2)
+M_vaf2_poolB <- 100*pc_poolB$sdev[2]^2/sum(pc_poolB$sdev^2)
+
+plot(pc_poolB$x[,1], pc_poolB$x[,2],
+     col = "black",
+     pch = 1,
+     xlab = sprintf("PC1 (%.1f%%)", M_vaf1_poolB),
+     ylab = sprintf("PC2 (%.1f%%)", M_vaf2_poolB))
+```
+
+Check mean and variance of genetic values for the traits in the parental pools
+
+```{r}
+cat("Both traits: PoolA meanG","\n")
+meanG(poolA)
+cat("Both traits: PoolA varG","\n")
+varG(poolA)
+cat("Both traits: PoolB meanG","\n")
+meanG(poolB)
+cat("Both traits: PoolB varG","\n")
+varG(poolB)
+
+hist(poolA@gv, breaks = 20, main = sprintf("Genetic values Pool A (mean = %.2f, var = %.2f)",
+                    meanG(poolA), varG(poolA)))
+abline(v = mean(poolA@gv), col = "purple", lty = 1, lwd = 3)
+hist(poolB@gv, breaks = 20, main = sprintf("Genetic values Pool B (mean = %.2f, var = %.2f)",
+                    meanG(poolB), varG(poolB)))
+abline(v = mean(poolB@gv), col = "purple", lty = 1, lwd = 3)
+```
+
+**Hybrid cross**
+
+```{r}
+#Factorial cross: "testcross" for all possible combinations
+hybridpop <- hybridCross(females = poolA,
+                         males = poolB, 
+                         crossPlan = "testcross")
+
+table(hybridpop@mother)
+table(hybridpop@father)
+
+cat("Both traits: Hybrid population meanG","\n")
+meanG(hybridpop)
+cat("Both traits: Hybrid population varG","\n")
+varG(hybridpop)
+
+par(mfrow=c(3,1))
+hist(hybridpop@gv, breaks = 20, main = sprintf("Genetic values Hybrids (mean = %.2f, var = %.2f)",
+                    meanG(hybridpop), varG(hybridpop)))
+abline(v = mean(hybridpop@gv), col = "blue", lty = 1, lwd = 3)
+hist(poolA@gv, breaks = 20, main = sprintf("Genetic values Pool A (mean = %.2f, var = %.2f)",
+                    meanG(poolA), varG(poolA)))
+abline(v = mean(poolA@gv), col = "purple", lty = 1, lwd = 3)
+hist(poolB@gv, breaks = 20, main = sprintf("Genetic values Pool B (mean = %.2f, var = %.2f)",
+                    meanG(poolB), varG(poolB)))
+abline(v = mean(poolB@gv), col = "purple", lty = 1, lwd = 3)
+
+```
+
+Run a PCA for the full population 
+
+```{r}
+#Check PCA
+M_hybrid <- pullSegSiteGeno(hybridpop)
+G_all<-rbind(M_qtlA, M_qtlB, M_hybrid)
+grp <- factor(c(rep("H", nrow(M_hybrid)),
+                rep("A", nrow(M_qtlA)),
+                rep("B", nrow(M_qtlB))),
+              levels = c("H","A","B"))
+
+pc_all <- prcomp(G_all, center = TRUE, scale. = FALSE)
+varExp <- pc_all$sdev^2 / sum(pc_all$sdev^2)
+
+colors <- c(H = "grey50", A = "purple", B = "black")
+pchs <- c(H = 1, A = 19, B = 19)
+
+plot(pc_all$x[grp=="H",1], pc_all$x[grp=="H",2],
+     col = colors["H"], pch = pchs["H"], cex = 0.9,
+     xlab = sprintf("PC1 (%.1f%%)", 100*varExp[1]),
+     ylab = sprintf("PC2 (%.1f%%)", 100*varExp[2]),
+     main = "All")
+
+points(pc_all$x[grp=="A",1], pc_all$x[grp=="A",2],
+       col = colors["A"], pch = pchs["A"], cex = 1.2)
+points(pc_all$x[grp=="B",1], pc_all$x[grp=="B",2],
+       col = colors["B"], pch = pchs["B"], cex = 1.2)
+
+legend("topright",
+       legend = c("Hybrids","Pool A","Pool B"),
+       col = colors[c("H","A","B")],
+       pch = pchs[c("H","A","B")],
+       pt.cex = c(0.9, 1.2, 1.2),
+       bty = "n")
+
+```
+
+Calculate the Nei's distance and heterosis according to Gonzalez-Dieguez et al., 2025 and taken from Legarra et al., 2023: The amount of variation of dominance deviations decreases with genetic distance until the point where allele frequencies are uncorrelated, and then increases for negatively correlated frequencies. Heterosis always increases with Nei’s genetic distance
+
+```{r}
+(NeisDist <- mean((alleleFreqsA - alleleFreqsB)^2))
+
+# With the dominance traits
+d = SP$traits[[1]]@domEff
+cor_add_dom_Eff <- cor(SP$traits[[1]]@addEff, d)
+mean_d = mean(d)
+yi= nqtl*NeisDist*mean_d  #Heterosis Legarra et al 2023
+Hf1 = sum( d * (alleleFreqsA-alleleFreqsB)^2 )	#Mid-parent heterosis, defined as the deviation from the mean of the two parental populations, was calculated as described in Falconer (1981) (p. 257 Eq. 14.8)
+    Fst <- NeisDist/( mean(alleleFreqsA*(1 - alleleFreqsB)) + mean(alleleFreqsB*(1 - alleleFreqsB)))# 
+    nFixedOppAllele <- length( which(  alleleFreqsA == 1 & alleleFreqsB == 0 | alleleFreqsA == 0 & alleleFreqsB ==1  ) ) /(nqtl*nchr)  ##fraction of fixed QTL
+    nAlmostFixedOppAllele <- length( which(  alleleFreqsA >=  0.95 & alleleFreqsB <= 0.05 | alleleFreqsA <= 0.05 & alleleFreqsB >=  0.95  ) ) /(nqtl*nchr) ##fraction of fixed QTL, same as before but not strictly fixed as 1
+    nFixedSameAllele <- length( which(  alleleFreqsA == 1 & alleleFreqsB == 1 | alleleFreqsA == 0 & alleleFreqsB == 0) ) /(nqtl*nchr) ##fraction of fixed QTL
+    nAlmostFixedsameAllele <- length( which(  alleleFreqsA >=  0.95 & alleleFreqsB >=  0.95 | alleleFreqsA <= 0.05 & alleleFreqsB <= 0.05  ) ) /(nqtl*nchr) ##fraction of fixed QTL, same as before but not strictly fixed as 1
+    
+```
+
+
+We have the following pops:
+
+1.  Parental lines: **Pool A** and **Pool B** each with 40 individuals
+2.  Hybrids from the full factorial testcross: **hybridpop** with 1600 individuals
+3.  Hybrids from the testcross with 3 testers: **hybridpop_3testers** with 120 individuals
+
+To calculate the GCA of the entire population of the full factorial cross, we need to take the genetic values from each parent combination (hybrid) and calculate the average effect of each parent across all its crosses (mean per row in the case of the females and mean of the column in the case of the males).
+
+As these are the genetic values, the two replicates have the same value.
+
+```{r}
+# Some cleaning
+# keep <- c("founderpop", "poolA", "poolB", "hybridpop",
+#           "nparents", "ntesters",
+#           "meanG", "varG", "h2", 
+#           "nenvs", "nreps", "ngenos_ff"#,"nplots_ff", "ncols_ff", "nrows_ff", 
+#           )
+# rm(list = setdiff(ls(), intersect(ls(), keep)))
+# gc()
+
+gv_df <- data.frame(env = 1,
+                    mother_poolA = factor(as.numeric(hybridpop@mother)), #poolA
+                    father_poolB = factor(as.numeric(hybridpop@father)), #poolB
+                    id = factor(as.numeric(hybridpop@id)),
+                    rep = factor(rep(1:nreps, each = ngenos_ff)),
+                    gv.TraitA = as.numeric(hybridpop@gv[,1]))
+                    # ,
+                    # gv.TraitAD = as.numeric(hybridpop@gv[,2]))
+
+gv_df <- gv_df[order(gv_df$mother_poolA, gv_df$father_poolB), ]
+rbind((head(gv_df, n=2)), tail(gv_df, n=2))
+```
+
+Calculate the true GCA effects from the full factorial and the testcross for the additive trait
+
+```{r}
+# Create a matrix with the genetic values per combination of parents
+gv_table_trait1 <- with(gv_df, tapply(gv.TraitA, list(mother_poolA, father_poolB), unique)) #matrix with the genetic values of the hybrids per combination of parents
+colnames(gv_table_trait1) <- trimws(colnames(gv_table_trait1)) #tidy column names, removing extra spaces
+(pop_gv_mean_trait1 <- mean(gv_table_trait1)) #mean of the population in general, same as meanG = 70
+gv_table_trait1 <- gv_table_trait1 - pop_gv_mean_trait1 #genetic values without the intercept, so we can calculate the GCA effects directly
+(head(gv_table_trait1, n=3))
+
+# Calculate true GCA effects (all parent combos) for both pools
+(gca_full_A_trait1 <- rowMeans(gv_table_trait1)) 
+mean(gca_full_A_trait1) # -2.942091e-15 it is 0 because the trait is an additive trait 
+(gca_full_B_trait1 <- colMeans(gv_table_trait1))
+mean(gca_full_B_trait1) #-3.122502e-15 it is 0 because the trait is an additive trait
+(mean(gv_table_trait1 - gca_full_A_trait1 - gca_full_B_trait1)) # 3.618864e-15 SCA under the testcross model with an additive trait
+par(mfrow=c(1,2))
+hist(gca_full_A_trait1, breaks=20)
+hist(gca_full_B_trait1, breaks=20)
+par(mfrow=c(1,1))
+# Pool A (madres): ID = rownames
+df_gca_A <- data.frame(
+  mother_id = rownames(gv_table_trait1),
+  gca = as.numeric(gca_full_A_trait1)
+)
+df_gca_A <- df_gca_A[order(df_gca_A$gca), ]
+
+# Pool B (padres): ID = colnames
+df_gca_B <- data.frame(
+  father_id = colnames(gv_table_trait1),
+  gca = as.numeric(gca_full_B_trait1)
+)
+df_gca_B <- df_gca_B[order(df_gca_B$gca), ]
+
+barplot(df_gca_A$gca, names.arg = df_gca_A$mother_id,
+        las = 2, col = "purple",cex.names = 0.7,
+        ylab = "GCA",
+        main = sprintf("Trait1: GCA Pool A (var = %.3f)", var(df_gca_A$gca)))
+abline(h = 0, col = "red", lwd = 2)
+
+barplot(df_gca_B$gca, names.arg = df_gca_B$father_id,
+        las = 2, col = "black",cex.names = 0.7,
+        ylab = "GCA",
+        main = sprintf("Trait1: GCA Pool B (var = %.3f)", var(df_gca_B$gca)))
+abline(h = 0, col = "red", lwd = 2)
+
+```
+
+And the true GCA effects from the full factorial and the testcross 3 testers for the high-dominance trait
+
+```{r}
+# Create a matrix with the genetic values per combination of parents
+gv_table_trait2 <- with(gv_df, tapply(gv.TraitAD, list(mother_poolA, father_poolB), unique)) #matrix with the genetic values of the hybrids per combination of parents
+colnames(gv_table_trait2) <- trimws(colnames(gv_table_trait2)) #tidy column names, removing extra spaces
+(pop_gv_mean_trait2 <- mean(gv_table_trait2)) #mean of the population in general, same as meanG = 70
+gv_table_trait2 <- gv_table_trait2 - pop_gv_mean_trait2 #genetic values without the intercept, so we can calculate the GCA effects directly
+(head(gv_table_trait2, n=3))
+
+# Calculate true GCA effects (all parent combos) for both pools
+(gca_full_A_trait2 <- rowMeans(gv_table_trait2)) 
+mean(gca_full_A_trait2) # -2.942091e-15 it is 0 because the trait is an additive trait 
+(gca_full_B_trait2 <- colMeans(gv_table_trait2))
+mean(gca_full_B_trait2) #-3.122502e-15 it is 0 because the trait is an additive trait
+(mean(gv_table_trait2 - gca_full_A_trait2 - gca_full_B_trait2)) # 3.618864e-15 SCA under the testcross model with an additive trait
+```
+
+Now, we can calculate the GCA effects of the pool A from the genetic values from the 3 random testers from pool B testcross. Then, compare the accuracy of the GCA estimates from the 3 testers with the true GCA from the full factorial cross.
+
+**Scenario 1**
+
+- Because it is an additive trait (non-realistic), the GCA estimates from any 3 testers should be highly correlated with the true GCA from the full factorial cross. All relies on the GCA estimates from the pool A. In this case the only important thing is choosing testers with high GCA too... but this does not make sense in a context of a testcross (correlation should be 1).
+
+```{r}
+# Subset of 3 random testers from poolB
+(testers_idx <- sample(poolB@id, 1))
+((gv_table_trait1[, testers_idx])) # mean GCA females with the crosses with the 3 random testers
+
+# Correlation between the true GCA females from the full factorial cross and the GCA from the 3 testers
+(cor(gca_full_A_trait1, (gv_table_trait1[, testers_idx]))) # trait A=1, trait AD= -0.02180549
+plot(gca_full_A_trait1, (gv_table_trait1[, testers_idx]), main = "GCA Pool A trait AD: True full factorial vs true 1 tester") 
+abline(lm((gv_table_trait1[, testers_idx]) ~ gca_full_A_trait1), col = "blue", lwd = 2)
+
+#subset of the gv_df with only the hybrids with the 3 testers, same, the 2 reps have the same gv
+gv_df_1testers <- droplevels(gv_df[gv_df$father %in% testers_idx, ]) 
+head(gv_df_1testers, n=3)
+
+# Means don't change between the populations. In the hybrids with full factorial the variance is reduced by the half basically because the contribution in a full sibling family of each parent to the variance is 1/4 per each parent 1/4(18.00) + 1/4(21.59) ~ 4.5 + 5.4 = 9.9. And, of course with the testcrosses with 3 testers we have less variance because we sampled some parents, so is a less dispersed population. 
+
+
+mean(gv_df_1testers$gv.TraitA) #traitA=69.46333, traitAD=177.2884
+var(gv_df_1testers$gv.TraitA) #traitA=4.84553, traitAD=12.88481
+
+par(mfrow=c(2,1))
+hist(hybridpop@gv, breaks = 20, main = sprintf("Genetic values Hybrids (mean = %.2f, var = %.2f)",
+                    meanG(hybridpop), varG(hybridpop)))
+abline(v = mean(hybridpop@gv), col = "blue", lty = 1, lwd = 3)
+hist(gv_df_1testers$gv.TraitA, breaks = 20, main = sprintf("Genetic values testcross 1 tester (mean = %.2f, var = %.2f)",
+                    mean(gv_df_1testers$gv.TraitA), var(gv_df_1testers$gv.TraitA)))
+abline(v = mean(gv_df_1testers$gv.TraitA), col = "lightblue", lty = 1, lwd = 3)
+
+
+# hybridpop # we want the subset of 120 hybrids with testers above
+# hybridpop_sample <- hybridpop[hybridpop@father %in% testers_idx]
+
+# hybridpop_3testers <- randCross2(females = poolA, males = poolB,
+#                                   nProgeny = 1, nCrosses = 120,
+#                                   maleParents = testers_idx)
+# table(hybridpop_3testers@father)
+# table(hybridpop_3testers@mother)
+# 
+# meanG(hybridpop_3testers)
+# varG(hybridpop_3testers)                         
+```
+
+**Field experiments**
+
+Defining the experimental design: RCBD with 2 reps in 1 location for the testcross. Here. the main goal is to obtain the phenotypes to carry out the prediction with the testcross model in ASReml.
+
+```{r}
+
+library(FieldSimR)
+library(dplyr)
+
+# Experimental design parameters: testcross
+nenvs <- 1
+nblocks <- nreps <- 2
+ngenos_tc <- (nparents/2) * ntesters #number of hybrids in the testcross with 3 testers
+nplots_tc <- ngenos_tc*nblocks
+ncols_tc <- 8 # define number of columns in the field 
+nrows_tc <- nplots_tc/ncols_tc # define number of rows from the number of columns
+
+# Environmental variance calculated from the plot-level heritability h2 defined previously using the genetic variance of the full factorial cross
+# (varE <- diag(varG(hybridpop))/h2 - diag(varG(hybridpop))) 
+(varE <- (var(gv_df_1testers$gv.TraitA)/h2) - (var(gv_df_1testers$gv.TraitA))) 
+
+# varG(hybridpop)/(varG(hybridpop) + varE) # double check if it matches with the h2 = 0.3
+var(gv_df_1testers$gv.TraitA)/(var(gv_df_1testers$gv.TraitA) + varE) # double check if it matches with the h2 = 0.3
+
+# line-entry mean, varG/(varG + varE/nreps): this can be defined with the varE. This is higher because we have more reps representing the genotypes in the field
+# (h2_entry <- varG(hybridpop)/(varG(hybridpop) + (varE/nreps))) #0.4006176
+(h2_entry <- var(gv_df_1testers$gv.TraitA)/(var(gv_df_1testers$gv.TraitA) + (varE/nreps))) #0.4615385
+
+#From this entry-mean heritability, we can calculate the accuracy
+# sqrt(varG(hybridpop)/(varG(hybridpop) + varE/nreps)) #0.6329436
+(sqrt(var(gv_df_1testers$gv.TraitA)/(var(gv_df_1testers$gv.TraitA) + varE/nreps))) #0.6793661
+
+#Now we simulate the plot errors (as we are using the h2 at plot level). Depending of what we want to simulate we can change the parameters col.cor, row.cor and prop.spatial
+error_df <- FieldSimR::field_trial_error(varR = varE,
+                                         ntraits = 1,
+                                         nenvs = nenvs,
+                                         nblocks = nblocks,
+                                         ncols = ncols_tc,
+                                         nrows = nrows_tc,
+                                         spatial.model = "AR1")
+                                         # col.cor = 0.9, row.cor = 0.9,
+                                         # prop.spatial = 0.99)
+
+var(error_df$e.Trait1) #check if the variance of the errors is similar to the defined varE
+plot_effects(error_df, effect = "e.Trait1")
+
+# Now we can generate the phenotypes of the testcross population by adding the genetic values and the errors
+# gv_df2 <- gv_df[, c(1, 4, 5, 6)]
+gv_df2 <- gv_df_1testers[, c(1, 4, 5, 6)]
+pheno_df <- make_phenotypes(gv.df = gv_df2, error_df, randomise = T)
+
+# Recover parents info
+pedigree <- gv_df_1testers %>%
+  select(id, mother_poolA, father_poolB) %>%
+  distinct(id, .keep_all = TRUE)
+
+pheno_df <- pheno_df %>% left_join(pedigree, by = "id")
+head(pheno_df)
+plot_effects(pheno_df, effect = "y.Trait1")
+
+par(mfrow=c(2,1))
+hist(gv_df_1testers$gv.TraitA, breaks = 20, main = sprintf("Genetic values testcross 1 tester (mean = %.2f, var = %.2f)",
+                    mean(gv_df_1testers$gv.TraitA), var(gv_df_1testers$gv.TraitA)))
+abline(v = mean(gv_df_1testers$gv.TraitA), col = "lightblue", lty = 1, lwd = 3)
+hist(pheno_df$y.Trait1, breaks = 20, main = sprintf("Phenotypic values testcross 1 tester (mean = %.2f, var = %.2f)",
+                    mean(pheno_df$y.Trait1), var(pheno_df$y.Trait1)))
+abline(v = mean(pheno_df$y.Trait1), col = "darkblue", lty = 1, lwd = 3)
+```
+Obtain the GCA from the phenotypes using the phenotype data frame
+
+```{r}
+# Obtain the mean per rep
+pheno_gca_1t_A_trait1 <- pheno_df %>%
+  group_by(id,mother_poolA, father_poolB) %>%
+  summarise(mean_y.Trait1 = mean(y.Trait1)) %>%
+  ungroup()
+
+r<-(cor(gca_full_A_trait1, pheno_gca_1t_A_trait1$mean_y.Trait1))
+plot(gca_full_A_trait1, pheno_gca_1t_A_trait1$mean_y.Trait1,
+     main = sprintf("GCA Pool A Trait1: full factorial vs 1 tester phenotypic(r = %.2f)", r),
+     xlab = "True GCA (full factorial)",
+     ylab = "GCA testcross from pheno (1 tester)",
+     pch = 1, col = "grey40")
+
+abline(lm(pheno_gca_1t_A_trait1$mean_y.Trait1 ~ gca_full_A_trait1),
+       col = "blue", lwd = 2)
+
+r2<-(cor((gv_table_trait1[, testers_idx]), pheno_gca_1t_A_trait1$mean_y.Trait1))
+plot((gv_table_trait1[, testers_idx]), pheno_gca_1t_A_trait1$mean_y.Trait1,
+     main = sprintf("GCA Pool A Trait1: 1 tester geno vs 1 tester phenotypic(r = %.2f)", r2),
+     xlab = "GCA testcross from gv (1 tester)",
+     ylab = "GCA testcross from pheno (1 tester)",
+     pch = 1, col = "grey40")
+abline(lm(pheno_gca_1t_A_trait1$mean_y.Trait1 ~ (gv_table_trait1[, testers_idx])),
+       col = "blue", lwd = 2)
+
+```
+
+Predicting the GCA values from the phenotypes obtained from the testcrosses with ASReml using different models and obtaining the accuracies compared to the ground truth
+
+```{r}
+library(asreml)
+
+# Fit the testcross model to estimate GCA effects of the mothers of pool A
+names(pheno_df)
+# Model 1
+model_testcross1 <- asreml(fixed = y.Trait1 ~ father_poolB - 1, 
+                          random = ~ mother_poolA + block, 
+                          residual = ~units,
+                          data = pheno_df)
+model_testcross1 <- update(model_testcross1)
+(summary(model_testcross1)$varcomp)
+(model_testcross1$coefficients$fixed)
+(model_testcross1$coefficients$random) #GCA for pool A and block
+
+gca_pred_1t <- predict(model_testcross1, classify = "mother_poolA", only = "mother_poolA")
+gca_pred_1t$pvals #GCA for pool A, same as above
+
+# Model 2 - include spatial
+model_testcross2 <- asreml(fixed = y.Trait1 ~ father_poolB - 1, 
+                          random = ~ mother_poolA +
+                                     block, 
+                          residual = ~ar1(col):ar1(row),
+                          data = pheno_df)
+model_testcross2 <- update(model_testcross2)
+summary(model_testcross2)$varcomp
+model_testcross2$coefficients$fixed
+model_testcross2$coefficients$random
+
+
+plot(model_testcross1$coefficients$random, model_testcross2$coefficients$random); abline(a=0, b=1)
+
+r3<-(cor(model_testcross1$coefficients$random, model_testcross2$coefficients$random))
+plot(model_testcross1$coefficients$random, model_testcross2$coefficients$random,
+     main = sprintf("GCA pred Trait1: 1t model 1 vs GCA pred Trait1: 1t model 2 (r = %.2f)", r3),
+     xlab = "GCA predicted testcross from model 1 (1 tester)",
+     ylab = "GCA predicted testcross from model 2 (1 tester)",
+     pch = 1, col = "grey40")
+abline(a=0,b=1,
+       col = "blue", lwd = 2)
+
+r4<-(cor(gca_full_A_trait1, model_testcross2$coefficients$random[1:40, 1]))
+plot(gca_full_A_trait1, model_testcross2$coefficients$random[1:40, 1],
+     main = sprintf("True GCA (full factorial) vs GCA pred Trait1: 1t model 2 (r = %.2f)", r4),
+     xlab = "True GCA (full factorial)",
+     ylab = "GCA predicted testcross from model 2 (1 tester)",
+     pch = 1, col = "grey40")
+abline(a=0,b=1,
+       col = "blue", lwd = 2)
+
+# include genomic information...
+# do that via QTL genotypes (unrealistic )
+# do that via SNP genotypes (realistic 
+
+model_testcross3 <- asreml(fixed = y.Trait1 ~ father_poolB - 1, 
+                          random = ~ vm(mother_poolA, GRM) +                                                      
+                                     block, 
+                          residual = ~ar1(col):ar1(row),
+                          data = pheno_df)
+
+gca_pred_3t <- predict(model_testcross3, classify = "mother_poolA", only = "mother_poolA")
+```
+
+Drafts
+```{r}
+gca_pred_3t$pvals
+(mean_gca_pred_3t <- mean(gca_pred_3t$pvals$predicted.value))
+gca_pred_3t$pvals<- gca_pred_3t$pvals %>% mutate(gca_predictedpoolA = predicted.value - mean_gca_pred_3t)
+
+tail(gca_pred_3t$pvals)
+
+```
+
