@@ -1,7 +1,7 @@
 ## Loop over dominance and tester levels ##
 # PaulaE
 rm(list = ls())
- # .rs.restartR()
+# .rs.restartR()
 
 library(AlphaSimR)
 library(FieldSimR)
@@ -21,11 +21,8 @@ nGenSplit = 50 #Heterotic pool split
 meanG <- 70
 varG <- 20
 h2 <- 0.3 # plot-level heritability, ratio of genetic to phenotypic variance, varG/(varG + varE)
-meanDD<- c(1.2, 0.9, 0.5, 0.2, 0) #high, medium and low dominance according to Gonzalez-Dieguez 2025
-# meanDD <- 0.9 #high dominance according to Gonzalez-Dieguez 2025
-# meanDD_medium <- 0.5 #medium dominance according to Gonzalez-Dieguez 2025
-# meanDD_low <- 0.2 #low dominance according to Gonzalez-Dieguez 2025
-varDD <- 0.2
+meanDD<- c(1.2, 0.9, 0.5, 0.2, 0) #high 0.9, medium 0.5 and low 0.2 dominance according to Gonzalez-Dieguez 2025
+# varDD <- 0.2
 
 # Experimental design parameters: full factorial
 nenvs <- 1
@@ -38,6 +35,7 @@ nblocks <- nreps <- 2
 
 heterosis_dd <- list()
 vd_dd <- list()
+gcaff_var_dd <- list()
 
 # Loop over dominance levels #
 
@@ -61,6 +59,8 @@ for(d in meanDD){
   SP$setTrackPed(TRUE)
   # SP$restrSegSites(minSnpPerChr = nsnps, overlap = F)
   SP$addSnpChip(nsnps)
+  
+  if (d == 0) {varDD <- 0} else {varDD <- 0.2}
   SP$addTraitAD(nQtlPerChr=nqtl, mean = meanG, var = varG, meanDD = d, varDD = varDD)
   
   poolA <- newPop(founderpop[1:(nparents/2)])
@@ -73,18 +73,22 @@ for(d in meanDD){
   M_qtlA <- pullQtlGeno(poolA)
   alleleFreqs_sitesA <- colMeans(M_segsitesA)/2
   alleleFreqs_snpsA <- colMeans(M_snpsA)/2
+  alleleFreqs_qtlA <- colMeans(M_qtlA)/2
   
   M_segsitesB <- pullSegSiteGeno(poolB)
   M_snpsB <- pullSnpGeno(poolB)
   M_qtlB <- pullQtlGeno(poolB)
   alleleFreqs_sitesB <- colMeans(M_segsitesB)/2
   alleleFreqs_snpsB <- colMeans(M_snpsB)/2
+  alleleFreqs_qtlB <- colMeans(M_qtlB)/2
   
   cat(" Overlap between QTL and SNPs in pool A: ", sum(colnames(M_qtlA) %in% colnames(M_snpsA)), "\n")
   overlap_A <- sum(colnames(M_qtlA) %in% colnames(M_snpsA))
   
   cat("Correlation between allele frequencies of all the sites", cor(alleleFreqs_sitesA, alleleFreqs_sitesB), "\n") 
-  cor_allele_freqs <- cor(alleleFreqs_sitesA, alleleFreqs_sitesB) 
+  cor_allele_freqssites <- cor(alleleFreqs_sitesA, alleleFreqs_sitesB) 
+  cor_allele_freqssnps <- cor(alleleFreqs_snpsA, alleleFreqs_snpsB) 
+  cor_allele_freqsqtl <- cor(alleleFreqs_qtlA, alleleFreqs_qtlB)  
   
    
   png(file.path("results", paste0(d,"DD"),
@@ -92,7 +96,7 @@ for(d in meanDD){
   plot(alleleFreqs_sitesA, alleleFreqs_sitesB,
        xlab = "Allele frequencies Pool A",
        ylab = "Allele frequencies Pool B",
-       main = paste0("All sites allele frequencies", "\n", "between pools with split = ", nGenSplit),
+       main = paste0("All sites allele frequencies", "\n", "between pools with split ", nGenSplit, "\n", "DD", d),
        pch = 1, col = "grey60")
   abline(0,1, lwd = 2)
   legend("topleft",
@@ -105,11 +109,24 @@ for(d in meanDD){
   plot(alleleFreqs_snpsA, alleleFreqs_snpsB,
        xlab = "Allele frequencies Pool A",
        ylab = "Allele frequencies Pool B",
-       main = paste0("SNPs allele frequencies", "\n", "between pools with split = ", nGenSplit),
+       main = paste0("SNPs allele frequencies", "\n", "between pools with split ", nGenSplit, "\n", "DD", d),
        pch = 1, col = "grey60")
   abline(0,1, lwd = 2)
   legend("topleft",
          legend = sprintf("correlation = %.3f", cor(alleleFreqs_snpsA, alleleFreqs_snpsB)),
+         bty = "n")
+  dev.off()
+  
+  png(file.path("results", paste0(d,"DD"),
+                paste0("1dd_", d,"_corallfreqsqtl.png")), width = 2400, height = 1800, res = 600)
+  plot(alleleFreqs_qtlA, alleleFreqs_qtlB,
+       xlab = "Allele frequencies Pool A",
+       ylab = "Allele frequencies Pool B",
+       main = paste0("QTL allele frequencies", "\n", "between pools with split ", nGenSplit, "\n", "DD", d),
+       pch = 1, col = "grey60")
+  abline(0,1, lwd = 2)
+  legend("topleft",
+         legend = sprintf("correlation = %.3f", cor(alleleFreqs_qtlA, alleleFreqs_qtlB)),
          bty = "n")
   dev.off()
 
@@ -140,10 +157,10 @@ for(d in meanDD){
   hist(hybridpop@gv[,1], breaks = 10, freq = FALSE,
        xlim = range(c(hybridpop@gv[,1], poolA@gv[,1], poolB@gv[,1])),
        col = adjustcolor("#FFC20A", 0.30), border = NA,
-       main = sprintf("GV Trait1\nHybrids mean=%.2f var=%.2f\nPoolA mean=%.2f var=%.2f\nPoolB mean=%.2f var=%.2f",
+       main = sprintf("GV Trait1 DD",d, "\n","Hmean%.2f var=%.2f\nPoolA mean=%.2f var=%.2f\nPoolB mean=%.2f var=%.2f",
                       mean(hybridpop@gv[,1]), popVar(hybridpop@gv[,1]),
                       mean(poolA@gv[,1]),     popVar(poolA@gv[,1]),
-                      mean(poolB@gv[,1]),     popVar(poolB@gv[,1])))
+                      mean(poolB@gv[,1]),     popVar(poolB@gv[,1])), cex.main = 0.5)
     # Add pool A
   hist(poolA@gv[,1], breaks = 10, add = TRUE, freq = FALSE,
        col = adjustcolor("purple2", 0.25), border = NA)
@@ -199,16 +216,20 @@ for(d in meanDD){
 
   addEff = SP$traits[[1]]@addEff
   domEff = SP$traits[[1]]@domEff
-  M_qtlA <- pullQtlGeno(poolA)
-  M_qtlB <- pullQtlGeno(poolB)
-  alleleFreqs_qtlA <- colMeans(M_qtlA)/2
-  alleleFreqs_qtlB <- colMeans(M_qtlB)/2
+  
+  mean_pool_allfreqsites <- mean(abs(alleleFreqs_sitesA - alleleFreqs_sitesB))
+  mean_pool_allfreqqtl <- mean(abs(alleleFreqs_qtlA - alleleFreqs_qtlB))
   
   HF1 <- sum(domEff * (alleleFreqs_qtlA - alleleFreqs_qtlB)^2)
   MPH <- mean(hybridpop@gv[,1]) - (mean(poolA@gv[,1]) + mean(poolB@gv[,1]))/2
   BPH <- mean(hybridpop@gv[,1]) - max(mean(poolA@gv[,1]), mean(poolB@gv[,1]))
   
-  heterosis_dd[[as.character(d)]] <- data.frame(meanDD = d, HF1 = HF1, MPH = MPH, BPH = BPH)
+  heterosis_dd[[as.character(d)]] <- data.frame(meanDD = d, 
+                                                cor_allele_freqssites = cor_allele_freqssites,
+                                                cor_allele_freqsqtl = cor_allele_freqsqtl,
+                                                mean_pool_allfreqqtl = mean_pool_allfreqqtl,
+                                                mean_pool_allfreqsites = mean_pool_allfreqsites,
+                                                HF1 = HF1, MPH = MPH, BPH = BPH)
   
   vd_dd[[as.character(d)]] <- data.frame(meanDD = d, 
                                          varA = varA(hybridpop), 
@@ -251,28 +272,47 @@ for(d in meanDD){
   gv_ff_df <- gv_ff_df[order(gv_ff_df$mother_poolA, gv_ff_df$father_poolB), ]
   
   # Create a matrix with the genetic values per combination of parents
-  gca_table_trait1 <- with(gv_ff_df, tapply(gv.TraitA, list(mother_poolA, father_poolB), unique)) #matrix with the genetic values of the hybrids per combination of parents
-  colnames(gca_table_trait1) <- trimws(colnames(gca_table_trait1)) #tidy column names, removing extra spaces
-  pop_gv_mean_trait1 <- mean(gca_table_trait1) #mean of the population in general, same as meanG = 70
-  gca_table_trait1 <- gca_table_trait1 - pop_gv_mean_trait1 #genetic values without the intercept, so we can calculate the GCA effects directly
+  gv_ff_matrix <- with(gv_ff_df, tapply(gv.TraitA, list(mother_poolA, father_poolB), unique)) #matrix with the genetic values of the hybrids per combination of parents
+  colnames(gv_ff_matrix) <- trimws(colnames(gv_ff_matrix)) #tidy column names, removing extra spaces
+  pop_gv_mean_trait1 <- mean(gv_ff_matrix) #mean of the population in general, same as meanG = 70. Here as a matrix it takes correctly the mean of all the gvs centered 
+  gv_ff_matrix <- gv_ff_matrix - pop_gv_mean_trait1 #genetic values without the intercept, so we can calculate the GCA effects directly
   
   # Calculate true GCA effects (all parent combos) for pool A trait 1
-  gca_full_A_trait1 <- data.frame(mother_id = rownames(gca_table_trait1),
-                                  GCA = rowMeans(gca_table_trait1))
+  gca_full_A_trait1 <- data.frame(mother_id = rownames(gv_ff_matrix),
+                                  GCA = rowMeans(gv_ff_matrix))
  
   png(file.path("results", paste0(d,"DD"),
                 paste0("4dd_", d,"histGCA.png")), width = 2600, height = 2000, res = 600)
   hist(gca_full_A_trait1$GCA, breaks = 20, 
-       main = sprintf("GCA effects Pool A nmean=%.2f var=%.2f",
-                      mean(gca_full_A_trait1$GCA), popVar(gca_full_A_trait1$GCA)))
+       main = sprintf("GCA effects Pool A DD %.2f\nmean=%.2f var=%.2f",
+                      d, mean(gca_full_A_trait1$GCA), popVar(gca_full_A_trait1$GCA)))
   abline(v = mean(gca_full_A_trait1$GCA), col = "purple2", lty = 1, lwd = 3) 
   dev.off() 
   
-  sca_table_trait1 <- (gca_table_trait1 - rowMeans(gca_table_trait1) - colMeans(gca_table_trait1))
-  sca_full_trait1 <- data.frame(mother_id = rep(rownames(gca_table_trait1), each = ncol(gca_table_trait1)),
-                              father_id = as.numeric(rep(colnames(gca_table_trait1), times = nrow(gca_table_trait1))),
-                              SCA = as.vector(sca_table_trait1))
+  gca_full_B_trait1 <- data.frame(father_id = colnames(gv_ff_matrix),
+                                  GCA = colMeans(gv_ff_matrix))
+  
+  sca_table_trait1 <- sweep(gv_ff_matrix, 1, gca_full_A_trait1$GCA, FUN = "-") 
+  sca_table_trait1 <- sweep(sca_table_trait1, 2, gca_full_B_trait1$GCA, FUN = "-") #calculate the SCA effects as the deviation from the GCA effects of both parents
     
+  sca_full_trait1 <- data.frame(mother_id = rep(rownames(gv_ff_matrix), each = ncol(gv_ff_matrix)),
+                              father_id = as.numeric(rep(colnames(gv_ff_matrix), times = nrow(gv_ff_matrix))),
+                              SCA = as.vector(sca_table_trait1))
+  
+  png(file.path("results", paste0(d,"DD"),
+                paste0("4dd_", d,"histSCA.png")), width = 2600, height = 2000, res = 600)
+  hist(sca_full_trait1$SCA, breaks = 20,
+       main = sprintf("SCA effects A DD %.2f\nmean=%.2f var=%.2f",
+                      d, mean(sca_full_trait1$SCA), popVar(sca_full_trait1$SCA)))
+  abline(v = mean(sca_full_trait1$SCA), col = "#FFC20A", lty = 1, lwd = 3)
+  dev.off()
+  
+  gcaff_var_dd[[as.character(d)]] <- data.frame(meanDD = d,
+                                                var_GCA_A = popVar(gca_full_A_trait1$GCA),
+                                                var_GCA_B = popVar(gca_full_B_trait1$GCA),
+                                                var_SCA   = popVar(sca_full_trait1$SCA))
+  
+  
  ## GRM ##
  
   Z <- sweep(M_snpsA, 2, 2*alleleFreqs_snpsA, "-") # the markers matrix from the SNPs (M_snpsA) in the mothers, apply by columns 2, 2pj substract so the mean is 0
@@ -285,16 +325,16 @@ for(d in meanDD){
   
   ## Loop over testers ##
   
-  ntesters <- c(1,3,5,10,20)
+  ntesters <- c(1,3,5,10,15)
   nsamples <- 120
   top_n <- 10
   top_true <- as.numeric(gca_full_A_trait1$mother_id[order(gca_full_A_trait1$GCA, decreasing = TRUE)][1:top_n])
-  cor_gca_full_list <- cor_gca_tc_list <- meangca_list <- vargca_list <- ranking_intercept <- idx_list <- c()
+  cor_gca_full_list <- cor_gca_tc_list <- meangca_list <- varE_list <- vargcas_scas_full_tc_list <- vargcaA_models_list <- ranking_intercept <- idx_list <- c()
   # cor_sca_tc_list
   ctr <- 0
   
   for(k in ntesters){
-    niter <- if (k == 1) 5 * (length(poolB@id)) else nsamples
+    niter <- if (k == 1) 2 * (length(poolB@id)) else nsamples
     
     for(i in 1:niter){
       ctr <- ctr + 1
@@ -311,15 +351,20 @@ for(d in meanDD){
       tester_set <- paste(sort(testers_idx), collapse = ",")
       
       # Correlation between the true GCA females from the full factorial cross and the GCA from the 3 testers
-      gca_testcross_A_trait1 <- data.frame(mother_id = rownames(gca_table_trait1),
-                                           GCA_tc = rowMeans(cbind(gca_table_trait1[, testers_idx])))
+      gca_testcross_A_trait1 <- data.frame(mother_id = rownames(gv_ff_matrix),
+                                           GCA_tc = rowMeans(cbind(gv_ff_matrix[, testers_idx])))
       
+      gca_testcross_B_trait1 <- data.frame(father_id = as.character(testers_idx),
+                                           GCA_tc = NA)
+      
+      sca_testcross_trait1 <- data.frame(mother_id = rep(rownames(sca_table_trait1), times = length(testers_idx)),
+                                         father_id = rep(testers_idx, each = nrow(sca_table_trait1)),
+                                         SCA_tc    = NA)
       if (k > 1) {
         
       gca_testcross_B_trait1 <- data.frame(father_id = as.character(testers_idx),
-                                           GCA_tc    = colMeans(gca_table_trait1[, as.character(testers_idx), drop = FALSE]))
+                                           GCA_tc    = colMeans(gv_ff_matrix[, as.character(testers_idx), drop = FALSE]))
         
-      
       sca_testcross_trait1 <- data.frame(mother_id = rep(rownames(sca_table_trait1), times = length(testers_idx)),
                                            father_id = rep(testers_idx, each = nrow(sca_table_trait1)),
                                            SCA_tc    = as.vector(sca_table_trait1[, as.character(testers_idx)])) %>%
@@ -341,10 +386,10 @@ for(d in meanDD){
       varE <- popVar(gv_ff_df_k_testers$gv.TraitA)/h2 - popVar(gv_ff_df_k_testers$gv.TraitA)
       
       
-      var_pops <- data.frame(PoolA = c(mean(poolA@gv[,1]), varA(poolA), varD(poolA), varA(poolA)+varD(poolA), varG(poolA), varA(poolA)/varG(poolA), varD(poolA)/varG(poolA),varE),
-                             PoolB = c(mean(poolB@gv[,1]), varA(poolB), varD(poolB), varA(poolB)+varD(poolB), varG(poolB), varA(poolB)/varG(poolB), varD(poolB)/varG(poolB),varE),
-                             Hybrids = c(mean(hybridpop@gv[,1]), varA(hybridpop), varD(hybridpop), varA(hybridpop)+varD(hybridpop), varG(hybridpop), varA(hybridpop)/varG(hybridpop), varD(hybridpop)/varG(hybridpop),varE),
-                             row.names = c("meangv", "varA", "varD","varA+D", "varG", "varA/varG", "varD/varG", "varE"))
+      # var_pops <- data.frame(PoolA = c(mean(poolA@gv[,1]), varA(poolA), varD(poolA), varA(poolA)+varD(poolA), varG(poolA), varA(poolA)/varG(poolA), varD(poolA)/varG(poolA),varE),
+      #                        PoolB = c(mean(poolB@gv[,1]), varA(poolB), varD(poolB), varA(poolB)+varD(poolB), varG(poolB), varA(poolB)/varG(poolB), varD(poolB)/varG(poolB),varE),
+      #                        Hybrids = c(mean(hybridpop@gv[,1]), varA(hybridpop), varD(hybridpop), varA(hybridpop)+varD(hybridpop), varG(hybridpop), varA(hybridpop)/varG(hybridpop), varD(hybridpop)/varG(hybridpop),varE),
+      #                        row.names = c("meangv", "varA", "varD","varA+D", "varG", "varA/varG", "varD/varG", "varE"))
       
       error_df <- FieldSimR::field_trial_error(varR = varE,
                                                ntraits = 1,
@@ -399,13 +444,18 @@ for(d in meanDD){
         rownames_to_column(var = "mother_id") %>% filter(grepl("^mother_poolA", mother_id)) %>% 
         mutate(mother_id = sub(".*_", "", mother_id), effect) 
       
+      gca_vc_m1 <- as.numeric(summary(model_testcross1)$varcomp["mother_poolA", "component"])
+      
       m2 <- model_testcross2$coefficients$random %>% as.data.frame() %>% 
         rownames_to_column(var = "mother_id") %>% filter(grepl("^mother_poolA", mother_id)) %>% 
         mutate(mother_id = sub(".*_", "", mother_id), effect)
       
+      gca_vc_m2 <- as.numeric(summary(model_testcross2)$varcomp["mother_poolA", "component"])
+      
       m3 <- model_testcross3$coefficients$random %>% as.data.frame() %>% 
         rownames_to_column(var = "mother_id") %>% filter(grepl("mother_poolA", mother_id)) %>% 
         mutate(mother_id = sub(".*_", "", mother_id), effect)
+      gca_vc_m3 <- as.numeric(summary(model_testcross3)$varcomp["vm(mother_poolA, GRM_A)", "component"])
       
       top_tc_gv <- as.numeric(gca_testcross_A_trait1$mother_id[order(gca_testcross_A_trait1$GCA_tc, decreasing = TRUE)][1:top_n])
       top_tc_pheno_nomodel <- as.numeric(pheno_gca_A_nomodels$mother_poolA[order(pheno_gca_A_nomodels$GCA_A_pheno, decreasing = TRUE)][1:top_n])
@@ -450,15 +500,30 @@ for(d in meanDD){
                                      model2  = mean(m2$effect),
                                      model3  = mean(m3$effect))
       
-      vargca_list[[ctr]] <- data.frame(ntesters = k,
-                                    iter = i,
-                                    tester_set = tester_set,
-                                    gv_full = popVar(gca_full_A_trait1$GCA),
-                                    gv_tc   = popVar(gca_testcross_A_trait1$GCA_tc),
-                                    pheno   = popVar(pheno_gca_A_nomodels$GCA_A_pheno),
-                                    model1  = popVar(m1$effect),
-                                    model2  = popVar(m2$effect),
-                                    model3  = popVar(m3$effect))
+      varE_list[[ctr]] <- data.frame(ntesters = k,
+                                     iter = i,
+                                     tester_set = tester_set,
+                                     varE = varE)
+      
+      vargcas_scas_full_tc_list[[ctr]] <- data.frame(ntesters = k,
+                                                     iter = i,
+                                                     tester_set = tester_set,
+                                                     gcaA_full = popVar(gca_full_A_trait1$GCA),
+                                                     gcaB_full = popVar(gca_full_B_trait1$GCA),
+                                                     sca_full = popVar(sca_full_trait1$SCA),
+                                                     gcaA_tc   = popVar(gca_testcross_A_trait1$GCA_tc),
+                                                     gcaB_tc = if (k > 1) popVar(gca_testcross_B_trait1$GCA_tc) else NA,
+                                                     sca_tc  = if (k > 1) popVar(sca_testcross_trait1$SCA_tc) else NA)
+      
+      vargcaA_models_list[[ctr]] <- data.frame(ntesters = k,
+                                               iter = i,
+                                               tester_set = tester_set,
+                                               gv_full = popVar(gca_full_A_trait1$GCA),
+                                               gv_tc   = popVar(gca_testcross_A_trait1$GCA_tc),
+                                               pheno   = popVar(pheno_gca_A_nomodels$GCA_A_pheno),
+                                               model1  = gca_vc_m1,
+                                               model2  = gca_vc_m2,
+                                               model3  = gca_vc_m3)
       
       ranking_intercept[[ctr]] <- data.frame(ntesters = k,
                                              iter = i,
@@ -480,13 +545,15 @@ for(d in meanDD){
   write.csv(cor_tc_df, file.path("results", paste0(d,"DD"), paste0("cor_tc_df_DD",d,".csv")), row.names = FALSE)
   mean_df     <- dplyr::bind_rows(meangca_list)
   write.csv(mean_df, file.path("results", paste0(d,"DD"), paste0("mean_df_DD",d, ".csv")), row.names = FALSE)
-  vargca_df      <- dplyr::bind_rows(vargca_list)
-  write.csv(vargca_df, file.path("results", paste0(d,"DD"), paste0("vargca_df_DD", d,".csv")), row.names = FALSE)
+  vargcas_scas_full_tc_list_df <- dplyr::bind_rows(vargcas_scas_full_tc_list)
+  write.csv(vargcas_scas_full_tc_list_df, file.path("results", paste0(d,"DD"), paste0("vargcas_scas_full_tc_list_df_DD",d,".csv")), row.names = FALSE)
+  vargcaA_models_df      <- dplyr::bind_rows(vargcaA_models_list)
+  write.csv(vargcaA_models_df, file.path("results", paste0(d,"DD"), paste0("vargca_df_DD", d,".csv")), row.names = FALSE)
   rank_df     <- dplyr::bind_rows(ranking_intercept)
   write.csv(rank_df, file.path("results", paste0(d,"DD"), paste0("rank_df_DD",d,".csv")), row.names = FALSE)
   idx_df      <- dplyr::bind_rows(idx_list)
   write.csv(idx_df, file.path("results", paste0(d,"DD"), paste0("idx_df_DD",d,".csv")), row.names = FALSE)
-  write.csv(var_pops, file.path("results", paste0(d,"DD"), paste0("var_pops_DD",d,".csv")), row.names = TRUE)
+  # write.csv(var_pops, file.path("results", paste0(d,"DD"), paste0("var_pops_DD",d,".csv")), row.names = TRUE)
   
   cor_full_mean <- aggregate(cbind(gv_tc, pheno, model1, model2, model3) ~ ntesters,
                              data = cor_full_df, FUN = mean, na.rm = TRUE)
@@ -542,12 +609,12 @@ for(d in meanDD){
   } 
   
   vargca_mean <- aggregate(cbind(gv_full,gv_tc, pheno, model1, model2, model3) ~ ntesters,
-                        data = vargca_df, FUN = mean, na.rm = TRUE)
+                           data = vargcaA_models_df, FUN = mean, na.rm = TRUE)
   
   png(file.path("results", paste0(d,"DD"),
-                paste0("6dd_",d,"_varGCA.png")), width = 2100, height = 1500, res = 300)
+                paste0("6dd_",d,"_varGCA_A.png")), width = 2100, height = 1500, res = 300)
   plot(vargca_mean$ntesters, vargca_mean$gv_full, pch=10,col = "green", 
-       type="l", lwd=2, xaxt="n", main = paste0("Var of GCA models n testers", "\n","dominance",d),
+       type="l", lwd=2, xaxt="n", main = paste0("Var of GCA pool A models n testers", "\n","dominance",d),
        ylim= range(vargca_mean[, c("gv_full","gv_tc","pheno","model1","model2","model3")]))
   axis(1, at = vargca_mean$ntesters)
   lines(vargca_mean$ntesters, vargca_mean$gv_tc, pch = 16, col = "forestgreen")
@@ -564,23 +631,41 @@ for(d in meanDD){
          col = c("green","forestgreen","royalblue","pink","magenta","aquamarine"), lwd =1, bty = "n")
   dev.off()
   
+  vargcas_scas_full_tc_mean <- aggregate(cbind(gcaA_full, gcaB_full, sca_full, gcaA_tc, gcaB_tc, sca_tc) ~ ntesters,
+                                         data = vargcas_scas_full_tc_list_df,FUN = mean, na.rm = TRUE)
+  
+  png(file.path("results", paste0(d,"DD"), paste0("6dd_",d,"var_GCA_SCA.png")),  width = 2100, height = 1500, res = 300)
+  
+  plot(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$gcaA_full, pch=10,col = "purple", 
+       type="l", lwd=2, xaxt="n", main = paste0("Var of GCA pool A models n testers", "\n","dominance",d),
+       ylim= range(vargcas_scas_full_tc_mean[, c("gcaA_full", "gcaB_full", "sca_full",  "gcaA_tc",  "gcaB_tc", "sca_tc")]))
+  axis(1, at = vargcas_scas_full_tc_mean$ntesters)
+  lines(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$gcaA_tc, lty=2, lwd=3,pch = 16, col = "purple")
+  lines(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$gcaB_full, pch = 16, lwd=2, col = "black")
+  lines(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$gcaB_tc, lty=2, lwd=3, pch = 16, col = "black")
+  lines(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$sca_full, pch = 16, lwd=2, col = "#FFC20A")
+  lines(vargcas_scas_full_tc_mean$ntesters, vargcas_scas_full_tc_mean$sca_tc, lty=2, lwd=3,pch = 16, col = "#FFC20A")
+  # points(vargca_mean$ntesters, vargca_mean$gv_tc,  col="blue",    pch=16)
+  # points(vargca_mean$ntesters, vargca_mean$pheno,  col="black",   pch=16)
+  # points(vargca_mean$ntesters, vargca_mean$model1, col="pink",    pch=16)
+  # points(vargca_mean$ntesters, vargca_mean$model2, col="magenta", pch=16)
+  # points(vargca_mean$ntesters, vargca_mean$model3, col="purple4", pch=16)
+  legend("topright", legend = c("FF_GCA_A","FF_GCA_B","FF_SCA","TC_GCA_A","TC_GCA_B","TC_SCA"),
+         col = c("purple","black","#FFC20A","purple", "black","#FFC20A"),
+         lty = c(1,1,1,2,2,2), lwd = 2, bty = "n", cex = 0.5)
+  dev.off()
   png(file.path("results", paste0(d,"DD"),
                 paste0("7dd_",d,"_overlaptesters.png")), width = 2100, height = 1500, res = 300)
-  boxplot(overlap ~ ntesters, data = subset(rank_df, method == "pheno"))
+  boxplot(overlap ~ ntesters, data = subset(rank_df, method == "pheno"), main= paste0("Overlap FF-TC of top ",top_n,"\n", "DD",d))
   dev.off()
   
   png(file.path("results", paste0(d,"DD"),
                 paste0("8dd_",d,"_overlapmodels.png")), width = 2100, height = 1500, res = 300)
-  boxplot(overlap ~ factor(method, levels = c("gv_tc","pheno","model1","model2","model3")), data = rank_df)
+  boxplot(overlap ~ factor(method, levels = c("gv_tc","pheno","model1","model2","model3")), data = rank_df, main= paste0("Overlap FF-TC of top ",top_n,"\n", "DD",d))
   dev.off()
   
-  # hist(rank_df$overlap[rank_df$method == "gv_tc"])
-  # hist(rank_df$overlap[rank_df$method == "pheno"])
-  # hist(rank_df$overlap[rank_df$method == "model1"])
-  # hist(rank_df$overlap[rank_df$method == "model2"])
-  # hist(rank_df$overlap[rank_df$method == "model3"])
-  
-  }
+}
+
 t1 <- Sys.time()  
 runtime <- difftime(t1, t0, units = "mins")
 cat("Total time for loop:", round(runtime, 3), "minutes\n",
@@ -591,7 +676,7 @@ cat("Total time for loop:", round(runtime, 3), "minutes\n",
 het_df <- dplyr::bind_rows(heterosis_dd) |> dplyr::arrange(meanDD)
 dom_df <- dplyr::bind_rows(vd_dd) |> dplyr::arrange(meanDD)
 
-colnames(dom_df)[2:6] <- c("varA", "varD", "varG", "varAovervarG", "varDovervarG")
+colnames(dom_df)[1:6] <- c("meanDD", "varA", "varD", "varG", "varAovervarG", "varDovervarG")
 write.csv(het_df, file.path("results", "heterosis_metrics_DD.csv"), row.names = FALSE)
 write.csv(dom_df, file.path("results", "dominance_variance_DD.csv"), row.names = FALSE)
 
@@ -621,6 +706,31 @@ legend("right", legend = c("varA/varG","varD/varG"),
        col = c("purple4","orange3"),
        lwd = 3, pch = 16, bty = "n")
 dev.off()
+
+gcaff_var_dd <- dplyr::bind_rows(gcaff_var_dd) %>% arrange(meanDD)
+write.csv(gcaff_var_dd, file.path("results", "gca_metrics_DD.csv"), row.names = FALSE)
+M <- t(as.matrix(gcaff_var_dd[, c("var_GCA_A","var_GCA_B","var_SCA")]))
+colnames(M) <- paste0("DD=", gcaff_var_dd$meanDD)
+rownames(M) <- c("GCA_A","GCA_B","SCA")
+varff_scagca_ratio <- gcaff_var_dd$var_SCA / (gcaff_var_dd$var_GCA_A + gcaff_var_dd$var_GCA_B)
+
+png(file.path("results", "FF_GCAs_SCA.png"), width = 2600, height = 1600, res = 300)
+par(mar = c(8, 4, 4, 2) + 0.1)
+text(x = barplot(M, beside = TRUE,
+                 col = c("purple2", "grey10", "#FFC20A"),
+                 ylab = "Variance", ylim = c(0, max(M, na.rm = TRUE) + 3),
+                 main = "Full factorial GCAs", las = 2),
+     y = as.vector(M),
+     labels = round(as.vector(M), 2), pos = 3, cex = 0.8)
+
+legend("topleft", legend = rownames(M), fill = c("purple2","grey10","#FFC20A"), bty = "n")
+mtext(
+  side = 1, line = 6,
+  text = paste0("ratio varSCA/varGCAs: ", paste(round(varff_scagca_ratio, 2), collapse = " | ")),
+  cex = 0.9, font = 2
+)
+dev.off()
+
 
 runtime <- difftime(t1, t0, units = "mins")
 cat("Total time for loop:", round(runtime, 3), "minutes\n",
